@@ -2,148 +2,151 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import numpy as np
 
-# --- KONFIGURASI ---
+# --- KONFIGURASI SKOR & KATEGORI (DI LUAR FUNGSI AGAR TIDAK ERROR) ---
 SCORE_MAP = {'SS': 6, 'S': 5, 'CS': 4, 'CTS': 3, 'TS': 2, 'STS': 1}
 
 def get_category(val):
-    if val in ['SS', 'S']: return 'Positif'
-    elif val == 'CS': return 'Netral'
-    elif val in ['CTS', 'TS', 'STS']: return 'Negatif'
+    if val in ['SS', 'S']:
+        return 'Positif'
+    elif val == 'CS':
+        return 'Netral'
+    elif val in ['CTS', 'TS', 'STS']:
+        return 'Negatif'
     return 'Unknown'
 
+# --- LOAD DATA ---
 @st.cache_data
 def load_data():
     file_name = 'data_kuesioner.xlsx'
+    # Membaca sheet utama
     df = pd.read_excel(file_name, sheet_name='Kuesioner')
+    # Membaca sheet pertanyaan untuk label
     try:
         df_q = pd.read_excel(file_name, sheet_name='Pertanyaan')
     except:
         df_q = pd.DataFrame()
+        
     return df, df_q
 
 # --- MAIN APP ---
-st.set_page_config(page_title="Analisis Kuesioner Pro", layout="wide")
+st.set_page_config(page_title="Analisis Kuesioner Interaktif", layout="wide")
 
 try:
     df_raw, df_pertanyaan = load_data()
     q_cols = [col for col in df_raw.columns if col.startswith('Q')]
-    # Kolom non-pertanyaan (Demografi)
-    demo_cols = [col for col in df_raw.columns if not col.startswith('Q')]
-    df_numeric = df_raw[q_cols].replace(SCORE_MAP)
+    df_data = df_raw[q_cols]
 except Exception as e:
     st.error(f"Gagal memuat file: {e}")
     st.stop()
 
-st.title("🚀 Dashboard Analisis Kuesioner v3.0")
+st.title("🚀 Dashboard Analisis Hasil Kuesioner")
+st.markdown("Analisis mendalam berdasarkan data `data_kuesioner.xlsx` dengan standarisasi skor 1-6.")
 
-# --- SIDEBAR: FILTER & NAV ---
-st.sidebar.header("⚙️ Kontrol & Filter")
-menu = st.sidebar.radio("Navigasi:", 
-    ["Ringkasan Data", "Analisis Sentimen", "Analisis Korelasi", "Analisis Responden & Grup"])
+# --- SIDEBAR NAVIGATION ---
+menu = st.sidebar.radio("Pilih Menu:", ["Ringkasan Data", "Analisis Distribusi & Kategori", "Analisis Per Pertanyaan"])
 
-# Filter Dinamis (Contoh: Filter berdasarkan kolom non-pertanyaan pertama)
-selected_filter = "Semua"
-if len(demo_cols) > 0:
-    filter_col = st.sidebar.selectbox("Filter berdasarkan:", ["Tanpa Filter"] + demo_cols)
-    if filter_col != "Tanpa Filter":
-        val_filter = st.sidebar.unique(df_raw[filter_col])
-        selected_filter = st.sidebar.selectbox(f"Pilih {filter_col}:", df_raw[filter_col].unique())
-        df_filtered = df_raw[df_raw[filter_col] == selected_filter]
-    else:
-        df_filtered = df_raw
-else:
-    df_filtered = df_raw
-
-df_data = df_filtered[q_cols]
-df_num_filtered = df_data.replace(SCORE_MAP)
+# Kalkulasi Data Global
+all_responses = pd.Series(df_data.values.flatten()).dropna()
+dist_counts = all_responses.value_counts().reindex(['SS','S','CS','CTS','TS','STS']).fillna(0)
 
 # --- MENU 1: RINGKASAN DATA ---
 if menu == "Ringkasan Data":
-    all_res = pd.Series(df_data.values.flatten()).dropna()
-    
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Responden Terfilter", len(df_filtered))
-    col2.metric("Rata-rata Skor", f"{df_num_filtered.mean().mean():.2f}")
-    col3.metric("Skor Tertinggi", f"{df_num_filtered.mean().max():.2f}")
-    col4.metric("Skor Terendah", f"{df_num_filtered.mean().min():.2f}")
+    col1.metric("Total Responden", len(df_raw))
+    col2.metric("Total Jawaban", len(all_responses))
+    col3.metric("Skala Terbanyak", dist_counts.idxmax())
+    
+    avg_total = df_data.replace(SCORE_MAP).mean().mean()
+    col4.metric("Rata-rata Skor Global", f"{avg_total:.2f}")
 
     st.markdown("---")
-    c1, c2 = st.columns([2, 1])
-    with c1:
-        st.subheader("📊 Performa per Pertanyaan")
-        avg_q = df_num_filtered.mean().sort_values()
-        fig_avg = px.bar(x=avg_q.values, y=avg_q.index, orientation='h', 
-                         color=avg_q.values, color_continuous_scale='Viridis',
-                         labels={'x': 'Skor Rata-rata', 'y': 'Pertanyaan'})
-        st.plotly_chart(fig_avg, use_container_width=True)
     
-    with c2:
-        st.subheader("📋 Top & Bottom 3")
-        st.write("**Top 3 Pertanyaan:**")
-        st.dataframe(avg_q.nlargest(3))
-        st.write("**Bottom 3 Pertanyaan:**")
-        st.dataframe(avg_q.nsmallest(3))
+    c_left, c_right = st.columns(2)
+    
+    with c_left:
+        st.subheader("📊 Distribusi Jawaban (Bar Chart)")
+        fig1 = px.bar(x=dist_counts.index, y=dist_counts.values, 
+                     labels={'x':'Skala', 'y':'Jumlah'},
+                     color=dist_counts.index,
+                     color_discrete_sequence=px.colors.qualitative.Pastel)
+        st.plotly_chart(fig1, use_container_width=True)
 
-# --- MENU 2: ANALISIS SENTIMEN ---
-elif menu == "Analisis Sentimen":
-    st.subheader("🎭 Analisis Kedalaman Sentimen")
-    
-    # Transformasi data untuk Heatmap Sebaran
-    list_heat = []
-    for q in q_cols:
-        counts = df_data[q].value_counts(normalize=True).reindex(['SS','S','CS','CTS','TS','STS']).fillna(0) * 100
-        list_heat.append(counts)
-    df_heat = pd.DataFrame(list_heat, index=q_cols)
+    with c_right:
+        st.subheader("🍕 Proporsi Jawaban (Pie Chart)")
+        fig2 = px.pie(names=dist_counts.index, values=dist_counts.values, 
+                      hole=0.4,
+                      color_discrete_sequence=px.colors.qualitative.Pastel)
+        st.plotly_chart(fig2, use_container_width=True)
 
-    fig_heat = px.imshow(df_heat, text_auto=".1f", aspect="auto",
-                         labels=dict(x="Pilihan Jawaban", y="Pertanyaan", color="Persentase (%)"),
-                         color_continuous_scale='RdYlGn')
-    st.plotly_chart(fig_heat, use_container_width=True)
-    st.caption("Warna hijau menunjukkan konsentrasi jawaban positif yang tinggi.")
-
-# --- MENU 3: ANALISIS KORELASI ---
-elif menu == "Analisis Korelasi":
-    st.subheader("🔗 Hubungan Antar Pertanyaan")
-    st.markdown("Fitur ini melihat apakah jawaban di satu pertanyaan cenderung sama dengan pertanyaan lainnya.")
+# --- MENU 2: KATEGORI SENTIMEN ---
+elif menu == "Analisis Distribusi & Kategori":
+    st.subheader("🎭 Distribusi Kategori Jawaban")
+    st.info("Kategori: Positif (SS, S), Netral (CS), Negatif (CTS, TS, STS)")
     
-    corr = df_num_filtered.corr()
-    fig_corr = px.imshow(corr, text_auto=".2f", color_continuous_scale='RdBu_r', range_color=[-1,1])
-    st.plotly_chart(fig_corr, use_container_width=True)
+    cat_data = all_responses.apply(get_category).value_counts().reindex(['Positif', 'Netral', 'Negatif'])
     
-    st.info("💡 **Tips:** Nilai mendekati 1.0 menunjukkan dua pertanyaan sangat berkaitan erat.")
-
-# --- MENU 4: ANALISIS RESPONDEN & GRUP ---
-elif menu == "Analisis Responden & Grup":
-    tab1, tab2 = st.tabs(["Deteksi Kualitas Data", "Perbandingan Grup"])
+    col_cat1, col_cat2 = st.columns([1, 2])
     
-    with tab1:
-        st.subheader("🧐 Deteksi Responden Tidak Konsisten")
-        # Cari responden yang standar deviasinya 0 (jawabannya sama semua dari awal sampai akhir)
-        std_per_user = df_num_filtered.std(axis=1)
-        straight_liners = df_filtered[std_per_user == 0]
+    with col_cat1:
+        st.write(cat_data)
         
-        st.warning(f"Ditemukan {len(straight_liners)} responden yang menjawab dengan nilai yang sama persis di semua pertanyaan.")
-        if not straight_liners.empty:
-            st.dataframe(straight_liners)
+    with col_cat2:
+        fig3 = px.bar(x=cat_data.index, y=cat_data.values,
+                     color=cat_data.index,
+                     color_discrete_map={'Positif':'#2ecc71', 'Netral':'#f1c40f', 'Negatif':'#e74c3c'},
+                     text=cat_data.values)
+        st.plotly_chart(fig3, use_container_width=True)
 
-    with tab2:
-        if len(demo_cols) > 0:
-            st.subheader("Comparing Groups")
-            group_col = st.selectbox("Pilih Kolom Pembanding:", demo_cols)
-            df_comp = df_raw.copy()
-            df_comp['Rata-rata'] = df_numeric.mean(axis=1)
-            
-            fig_comp = px.box(df_comp, x=group_col, y='Rata-rata', color=group_col,
-                             title=f"Distribusi Skor Berdasarkan {group_col}")
-            st.plotly_chart(fig_comp, use_container_width=True)
-        else:
-            st.write("Tidak ada data demografi untuk dibandingkan.")
+    st.markdown("---")
+    st.subheader("📈 Rata-rata Skor per Pertanyaan")
+    avg_scores = df_data.replace(SCORE_MAP).mean().sort_values(ascending=False)
+    
+    fig4 = px.bar(x=avg_scores.index, y=avg_scores.values,
+                 labels={'x':'Kode Pertanyaan', 'y':'Rata-rata Skor'},
+                 color=avg_scores.values,
+                 color_continuous_scale='RdYlGn')
+    st.plotly_chart(fig4, use_container_width=True)
 
-# --- DOWNLOAD FITUR ---
+# --- MENU 3: ANALISIS PER PERTANYAAN ---
+elif menu == "Analisis Per Pertanyaan":
+    st.subheader("📚 Sebaran Jawaban per Pertanyaan (Stacked Bar)")
+    
+    # Menyiapkan data untuk Stacked Bar
+    stacked_list = []
+    for q in q_cols:
+        counts = df_data[q].value_counts().reindex(['SS','S','CS','CTS','TS','STS']).fillna(0)
+        for skala, val in counts.items():
+            stacked_list.append({'Pertanyaan': q, 'Skala': skala, 'Jumlah': val})
+    
+    df_stacked = pd.DataFrame(stacked_list)
+    
+    fig5 = px.bar(df_stacked, x="Pertanyaan", y="Jumlah", color="Skala",
+                 title="Perbandingan Distribusi Skala antar Pertanyaan",
+                 color_discrete_sequence=px.colors.qualitative.Safe)
+    st.plotly_chart(fig5, use_container_width=True)
+
+    st.markdown("---")
+    
+    # BONUS: Radar Chart (Profil Kekuatan)
+    st.subheader("🕸️ Radar Chart: Profil Kualitas ")
+    avg_scores_raw = df_data.replace(SCORE_MAP).mean()
+    
+    fig6 = go.Figure()
+    fig6.add_trace(go.Scatterpolar(
+        r=avg_scores_raw.values,
+        theta=avg_scores_raw.index,
+        fill='toself',
+        name='Skor Rata-rata',
+        line_color='teal'
+    ))
+    fig6.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 6])))
+    st.plotly_chart(fig6, use_container_width=True)
+
+    if not df_pertanyaan.empty:
+        with st.expander("Lihat Detail Teks Pertanyaan"):
+            st.dataframe(df_pertanyaan)
+
+# --- FOOTER ---
 st.sidebar.markdown("---")
-if st.sidebar.button("📥 Generate Ringkasan (CSV)"):
-    summary = df_num_filtered.describe().T
-    csv = summary.to_csv().encode('utf-8')
-    st.sidebar.download_button("Download Sekarang", csv, "summary_kuesioner.csv", "text/csv")
+st.sidebar.caption("Sistem Analisis Kuesioner v2.0")
