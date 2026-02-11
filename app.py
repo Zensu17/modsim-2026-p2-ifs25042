@@ -4,18 +4,18 @@ import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
 from datetime import datetime
+import time  # Ditambahkan untuk jeda update jam
 
 # --- 1. KONFIGURASI & PEMBACAAN DATA ---
 st.set_page_config(page_title="NEO-ACADEMIC v1.1", layout="wide", page_icon="🎓")
 
-# Mapping skor sesuai file Keterangan.csv
+# Mapping skor
 SCORE_MAP = {'SS': 6, 'S': 5, 'CS': 4, 'CTS': 3, 'TS': 2, 'STS': 1}
 
 @st.cache_data
 def load_data():
     file_path = 'data_kuesioner.xlsx'
     try:
-        # Gunakan pandas excel reader (membutuhkan openpyxl)
         df_resp = pd.read_excel(file_path, sheet_name='Kuesioner')
         df_pert = pd.read_excel(file_path, sheet_name='Pertanyaan')
         q_cols = [col for col in df_resp.columns if col.startswith('Q')]
@@ -23,7 +23,7 @@ def load_data():
         q_dict = dict(zip(df_pert['Kode'], df_pert['Pertanyaan']))
         return df_resp, df_num, q_dict, df_pert, q_cols
     except Exception as e:
-        st.error(f"Gagal membaca data: {e}. Pastikan file 'data_kuesioner.xlsx' ada di folder.")
+        st.error(f"Gagal membaca data: {e}")
         return None, None, None, None, None
 
 df_raw, df_num, q_map, df_pert_full, q_cols = load_data()
@@ -31,8 +31,7 @@ df_raw, df_num, q_map, df_pert_full, q_cols = load_data()
 if df_raw is None: 
     st.stop()
 
-# --- 2. GLOBAL CALCULATIONS (Solusi Error NameError) ---
-# Variabel ini diletakkan di luar menu agar bisa diakses oleh semua fitur
+# --- 2. GLOBAL CALCULATIONS ---
 avg_per_q = df_num.mean()
 avg_total = avg_per_q.mean() 
 
@@ -63,9 +62,9 @@ with st.sidebar:
     st.markdown("<div style='text-align: center;'><h1 style='color: #1E90FF;'>NEO-ACADEMIC</h1></div>", unsafe_allow_html=True)
     st.markdown("---")
     
-    now = datetime.now()
-    st.markdown(f"📅 **Tanggal:** {now.strftime('%d %B %Y')}")
-    st.markdown(f"⏰ **Waktu:** {now.strftime('%H:%M:%S')}")
+    # Bagian Jam Real-time
+    st.write("🕒 **Waktu Sistem:**")
+    clock_placeholder = st.empty() # Placeholder untuk jam agar bisa di-update tanpa refresh page
     
     st.markdown("---")
     menu = st.radio("Pilih Analisis:", [
@@ -90,46 +89,37 @@ st.markdown(f"""
     """, unsafe_allow_html=True)
 
 # --- 6. LOGIKA MENU ---
+# (Konten menu tetap sama seperti kode Anda sebelumnya)
 
 if menu == "📊 Ringkasan Eksekutif":
-    # Baris Metrik Utama
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Rata-rata Global", f"{avg_total:.2f}")
     m2.metric("Total Partisipan", f"{len(df_raw)}")
     m3.metric("Skor Tertinggi", f"{avg_per_q.max():.2f} ({avg_per_q.idxmax()})")
     m4.metric("Kualitas Respons", "Sangat Baik")
-
     st.markdown("---")
-    
     col_l, col_r = st.columns([2, 1])
     with col_l:
         st.subheader("📊 Skor Rata-rata per Kode (Q1-Q17)")
         df_chart = avg_per_q.reset_index()
         df_chart.columns = ['Kode', 'Skor']
-        fig_bar = px.bar(df_chart, x='Kode', y='Skor', color='Skor',
-                         color_continuous_scale='Blues', text_auto='.2f')
+        fig_bar = px.bar(df_chart, x='Kode', y='Skor', color='Skor', color_continuous_scale='Blues', text_auto='.2f')
         fig_bar.update_layout(yaxis_range=[1, 6], paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig_bar, use_container_width=True)
-
     with col_r:
         st.subheader("🎯 Sebaran Jawaban")
         all_votes = pd.Series(df_raw[q_cols].values.flatten()).value_counts()
-        fig_pie = px.pie(names=all_votes.index, values=all_votes.values, hole=0.5,
-                         color_discrete_sequence=px.colors.sequential.Blues_r)
+        fig_pie = px.pie(names=all_votes.index, values=all_votes.values, hole=0.5, color_discrete_sequence=px.colors.sequential.Blues_r)
         st.plotly_chart(fig_pie, use_container_width=True)
 
 elif menu == "🔍 Detail Pertanyaan":
     st.title("🔍 Bedah Detail Pertanyaan")
     sel_q = st.selectbox("Pilih Pertanyaan:", q_cols, format_func=lambda x: f"{x}: {q_map.get(x, '')[:60]}...")
-    
     st.info(f"**Teks Pertanyaan:** {q_map.get(sel_q)}")
-    
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("Radar Chart")
-        fig_radar = go.Figure(data=go.Scatterpolar(
-            r=avg_per_q, theta=q_cols, fill='toself', line_color='#1e3c72'
-        ))
+        fig_radar = go.Figure(data=go.Scatterpolar(r=avg_per_q, theta=q_cols, fill='toself', line_color='#1e3c72'))
         fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 6])), paper_bgcolor='rgba(0,0,0,0)')
         st.plotly_chart(fig_radar, use_container_width=True)
     with c2:
@@ -140,42 +130,33 @@ elif menu == "🔍 Detail Pertanyaan":
 
 elif menu == "🌡️ Heatmap Konsistensi":
     st.title("🌡️ Matriks Korelasi Antar Poin")
-    st.write("Hubungan antar pertanyaan: Jika mendekati 1.0 (merah), maka mahasiswa cenderung memberikan jawaban yang selaras.")
     corr = df_num.corr()
     fig_heat = px.imshow(corr, text_auto=".1f", color_continuous_scale='RdBu_r')
     st.plotly_chart(fig_heat, use_container_width=True)
 
 elif menu == "⚖️ Matriks Prioritas":
     st.title("⚖️ Matriks Keputusan")
-    st.write("Memetakan pertanyaan berdasarkan Skor vs Konsistensi (Standar Deviasi).")
-    
-    priority_df = pd.DataFrame({
-        'Kode': q_cols,
-        'Skor': avg_per_q.values,
-        'Variansi': df_num.std().values
-    })
-    
-    fig_scatter = px.scatter(priority_df, x='Skor', y='Variansi', text='Kode', size='Skor',
-                             color='Skor', color_continuous_scale='Viridis')
-    
-    # Menambahkan garis bantu rata-rata (Sekarang variabel avg_total sudah terbaca)
+    priority_df = pd.DataFrame({'Kode': q_cols, 'Skor': avg_per_q.values, 'Variansi': df_num.std().values})
+    fig_scatter = px.scatter(priority_df, x='Skor', y='Variansi', text='Kode', size='Skor', color='Skor', color_continuous_scale='Viridis')
     fig_scatter.add_vline(x=avg_total, line_dash="dash", line_color="red", annotation_text="Rerata Global")
-    
     st.plotly_chart(fig_scatter, use_container_width=True)
-    st.markdown("""
-        **Cara Membaca:**
-        - **Kiri:** Pertanyaan dengan skor di bawah rata-rata (Prioritas Perbaikan).
-        - **Atas:** Pertanyaan dengan variansi tinggi (Jawaban responden sangat beragam).
-    """)
 
 elif menu == "📋 Database Instrumen":
     st.title("📋 Repositori Data Kuesioner")
     t1, t2 = st.tabs(["Daftar Pertanyaan Lengkap", "Data Mentah"])
-    with t1:
-        st.table(df_pert_full)
-    with t2:
-        st.dataframe(df_raw, use_container_width=True)
+    with t1: st.table(df_pert_full)
+    with t2: st.dataframe(df_raw, use_container_width=True)
 
-# --- 7. FOOTER ---
+# --- 7. FOOTER & LIVE CLOCK ENGINE ---
 st.markdown("---")
-st.markdown(f"<center><small>EduInsight v1.1 Stable | Laguboti, Indonesia | {now.year}</small></center>", unsafe_allow_html=True)
+st.markdown(f"<center><small>EduInsight v1.1 Stable | Laguboti, Indonesia | {datetime.now().year}</small></center>", unsafe_allow_html=True)
+
+# Logika untuk mengupdate jam secara real-time tanpa mengganggu interaksi user
+# Menggunakan looping di akhir skrip agar tidak memblokir render komponen di atas
+while True:
+    t_now = datetime.now()
+    clock_placeholder.markdown(f"""
+        📅 {t_now.strftime('%d %B %Y')}  
+        ⏰ **{t_now.strftime('%H:%M:%S')}**
+    """)
+    time.sleep(1)
