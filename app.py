@@ -6,7 +6,7 @@ import numpy as np
 from datetime import datetime
 
 # --- 1. KONFIGURASI & PEMBACAAN DATA ---
-st.set_page_config(page_title="NEO-ACADEMIC v10.1", layout="wide", page_icon="🎓")
+st.set_page_config(page_title="NEO-ACADEMIC v1.1", layout="wide", page_icon="🎓")
 
 # Mapping skor sesuai file Keterangan.csv
 SCORE_MAP = {'SS': 6, 'S': 5, 'CS': 4, 'CTS': 3, 'TS': 2, 'STS': 1}
